@@ -1,0 +1,92 @@
+shopt -s expand_aliases
+generate_cache()
+{
+
+	# Test return code
+	#fab -d 
+	# Function for generate the fabric's cache file for autocomplete
+	for method in $(fab --shortlist);do echo -n $method"|" >> "${fabric_cache}.tmp";fab -d $method 2>/dev/null | sed -e 's/self,//g' -e 's/=[^,]*//g' | awk '/Arguments/{for(i=2;i<=NF;i++){if($i !~ /^self/){printf $i}}}END{print}' >> "${fabric_cache}.tmp";done;
+	mv "${fabric_cache}.tmp" "$fabric_cache"
+	rm "${fabric_cache}.lock"
+}
+
+
+_fabric()
+{
+	# cache file
+	eval fabric_cache="~/.fabric_cache"
+
+	# remove = and add : as separator for autocompletion  
+        COMP_WORDBREAKS=${COMP_WORDBREAKS//:}
+        COMP_WORDBREAKS=${COMP_WORDBREAKS//=}
+
+        # Save current word
+        local cur=${COMP_WORDS[COMP_CWORD]}
+	
+	# Create cache File
+	# fabric_cache="~/.fabric_cache"
+	# > $fabric_cache
+	# for method in $(fab --shortlist);do echo -n $method"|" >> $fabric_cache;fab -d $method| awk '/Arguments/{for(i=2;i<=NF;i++){if($i !~ /^self/){printf $i}}}END{print}' >> $fabric_cache;done;
+	# sed -i -e 's/self,//g' -e 's/=[^,]*//g' $fabric_cache
+
+	# Define autocomplete for options with - 
+	if [[ "$cur" == -* ]]; then
+		COMPREPLY=( $( compgen -W '-h --help -V --version -l --list -d \
+		--display= -r --reject-unknown-hosts -D --disable-known-hosts \
+		-u --user= -p --password= -H --hosts= -R --roles= -i -f --fabfile= \
+		-w --warn-only -s --shell= -c --config= --hide= --show=' \
+		-- "$cur" ) )
+
+	# Define autocomplete for method
+	else
+		if [ -f "$fabric_cache" ]
+		then
+			local methods_name=$(awk -F"|" '{print $1}' $fabric_cache 2>/dev/null)
+			COMPREPLY=( $( compgen -W "${methods_name}" -S ":" -- $cur ) )
+
+			# Define autocompletion for method's parameters
+			for method in $methods_name
+			do
+				if [[ $cur == $method:* ]]
+				then
+					# word contain the name of the method without parameters
+					word=$(echo $cur | sed -e 's/[^:,]*$//g' 2>/dev/null)
+					parameters=$(awk -F"|" '/^'"$method"'\|/{print $0}' $fabric_cache | awk -F"|" '{print $2}'| tr "," "\n"| sed "s/^/$word/g" 2>/dev/null)
+					# This loop remove parameters in use 
+					actual_parameters=$(echo $cur | sed -e 's/^[^:]*://g' -e 's/=[^,]*//g' -e 's/,/ /g' 2>/dev/null)
+					for param in $actual_parameters
+					do	
+						parameters=$(echo $parameters | sed "s/,$param//g" 2>/dev/null )
+					done
+
+					COMPREPLY=( $(compgen -W "$parameters" -S '=' -- $cur) )
+					break
+				fi
+			done
+		fi
+	fi
+
+
+	if [ -f "$fabric_cache" ]
+	then
+		if [[ `find "$fabric_cache" -mtime -7` == "" ]]
+		then
+			if [ ! -f "${fabric_cache}.lock" ]
+			then
+				touch "${fabric_cache}.lock"
+				( generate_cache &  )
+				echo -e "\nCreating cache for fabric autocomplete in progress in background...\n"
+				echo -n ${COMP_LINE}
+			fi
+		fi
+	else
+		if [ ! -f "${fabric_cache}.lock" ]
+		then
+			touch "${fabric_cache}.lock"
+			( generate_cache &  )
+			echo `echo "Creating cache for fabric autocomplete in progress in background..."`
+		fi
+	fi
+
+}
+complete -o nospace -F _fabric fab
